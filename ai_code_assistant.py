@@ -2,6 +2,9 @@ import streamlit as st
 import anthropic
 import re
 
+
+DEFAULT_MODEL = "claude-sonnet-4-20250514"
+
 # ── Page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="AI Code Assistant",
@@ -230,19 +233,59 @@ hr { border-color: var(--border) !important; margin: 1.5rem 0 !important; }
 
 # ── Anthropic client ──────────────────────────────────────────────────────────
 @st.cache_resource
-def get_client():
-    return anthropic.Anthropic()
+def get_client(api_key: str):
+    return anthropic.Anthropic(api_key=api_key)
 
 
-def call_claude(system: str, user: str) -> str:
-    client = get_client()
+def call_claude(system: str, user: str, api_key: str, model: str) -> str:
+    client = get_client(api_key)
     msg = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model=model,
         max_tokens=4096,
         system=system,
         messages=[{"role": "user", "content": user}],
     )
     return msg.content[0].text
+
+
+def get_api_key() -> str:
+    return (
+        st.secrets.get("ANTHROPIC_API_KEY")
+        or st.session_state.get("anthropic_api_key", "")
+        or ""
+    )
+
+
+def setup_controls() -> tuple[str, str]:
+    with st.expander("⚙️ Assistant Settings", expanded=False):
+        api_key_default = st.session_state.get("anthropic_api_key", "")
+        api_key = st.text_input(
+            "Anthropic API Key",
+            type="password",
+            value=api_key_default,
+            placeholder="sk-ant-...",
+            help="Stored only for this browser session. You can also set ANTHROPIC_API_KEY in Streamlit secrets.",
+        )
+        st.session_state["anthropic_api_key"] = api_key
+
+        model = st.selectbox(
+            "Model",
+            options=[
+                DEFAULT_MODEL,
+                "claude-3-7-sonnet-latest",
+                "claude-3-5-sonnet-latest",
+            ],
+            index=0,
+            help="Choose the Claude model used for all assistant tabs.",
+        )
+
+    resolved_api_key = get_api_key()
+    if resolved_api_key:
+        st.caption("✅ API key detected. Ready to generate.")
+    else:
+        st.warning("Add an Anthropic API key in settings to use the assistant.")
+
+    return resolved_api_key, model
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -265,6 +308,8 @@ st.markdown("""
   <p>// english → code · code review · bug fixing</p>
 </div>
 """, unsafe_allow_html=True)
+
+api_key, model_choice = setup_controls()
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
 tab1, tab2, tab3 = st.tabs(["✦ English → Code", "⊞ Code Review", "⚑ Bug Fixer"])
@@ -295,7 +340,9 @@ with tab1:
     st.markdown('</div>', unsafe_allow_html=True)
 
     if gen_btn:
-        if not english_input.strip():
+        if not api_key:
+            st.error("Missing API key. Open Assistant Settings and add your Anthropic key.")
+        elif not english_input.strip():
             st.warning("Please describe what you want to build.")
         else:
             extras = []
@@ -311,23 +358,26 @@ Convert the user's plain-English description into clean, idiomatic {lang_choice}
 Wrap the code in a fenced code block with the correct language tag.
 After the code block, add a short 'How it works' explanation in 3-5 bullet points."""
 
-            with st.spinner("Generating code…"):
-                result = call_claude(system_prompt, english_input)
-
-            blocks = extract_code_blocks(result)
-            explanation = re.sub(r"```.*?```", "", result, flags=re.DOTALL).strip()
-
-            st.markdown('<span class="badge badge-green">✓ Generated</span>', unsafe_allow_html=True)
-
-            if blocks:
-                for lang_tag, code in blocks:
-                    st.code(code.strip(), language=lang_tag or lang_choice.lower())
+            try:
+                with st.spinner("Generating code…"):
+                    result = call_claude(system_prompt, english_input, api_key, model_choice)
+            except Exception as exc:
+                st.error(f"Generation failed: {exc}")
             else:
-                st.code(result, language=lang_choice.lower())
+                blocks = extract_code_blocks(result)
+                explanation = re.sub(r"```.*?```", "", result, flags=re.DOTALL).strip()
 
-            if explanation:
-                st.markdown("**How it works**")
-                st.markdown(explanation)
+                st.markdown('<span class="badge badge-green">✓ Generated</span>', unsafe_allow_html=True)
+
+                if blocks:
+                    for lang_tag, code in blocks:
+                        st.code(code.strip(), language=lang_tag or lang_choice.lower())
+                else:
+                    st.code(result, language=lang_choice.lower())
+
+                if explanation:
+                    st.markdown("**How it works**")
+                    st.markdown(explanation)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -358,7 +408,9 @@ with tab2:
     st.markdown('</div>', unsafe_allow_html=True)
 
     if review_btn:
-        if not code_to_review.strip():
+        if not api_key:
+            st.error("Missing API key. Open Assistant Settings and add your Anthropic key.")
+        elif not code_to_review.strip():
             st.warning("Please paste some code to review.")
         else:
             focuses = [f for f, c in [("code quality & readability", chk_quality),
@@ -385,11 +437,14 @@ If significant improvements exist, show a key refactored portion in a code block
 ## Summary
 One paragraph takeaway."""
 
-            with st.spinner("Reviewing code…"):
-                review_result = call_claude(system_prompt, code_to_review)
-
-            st.markdown('<span class="badge badge-blue">⊞ Review Complete</span>', unsafe_allow_html=True)
-            st.markdown(review_result)
+            try:
+                with st.spinner("Reviewing code…"):
+                    review_result = call_claude(system_prompt, code_to_review, api_key, model_choice)
+            except Exception as exc:
+                st.error(f"Review failed: {exc}")
+            else:
+                st.markdown('<span class="badge badge-blue">⊞ Review Complete</span>', unsafe_allow_html=True)
+                st.markdown(review_result)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -419,7 +474,9 @@ with tab3:
     st.markdown('</div>', unsafe_allow_html=True)
 
     if fix_btn:
-        if not buggy_code.strip():
+        if not api_key:
+            st.error("Missing API key. Open Assistant Settings and add your Anthropic key.")
+        elif not buggy_code.strip():
             st.warning("Please paste the buggy code.")
         else:
             context = f"Code:\n```\n{buggy_code}\n```"
@@ -445,15 +502,16 @@ Provide the complete corrected code in a fenced code block.
 ## What Changed
 Bullet-point summary of every change made and why."""
 
-            with st.spinner("Hunting bugs…"):
-                fix_result = call_claude(system_prompt, context)
+            try:
+                with st.spinner("Hunting bugs…"):
+                    fix_result = call_claude(system_prompt, context, api_key, model_choice)
+            except Exception as exc:
+                st.error(f"Bug fixing failed: {exc}")
+            else:
+                st.markdown('<span class="badge badge-red">⚑ Bugs Found & Fixed</span>', unsafe_allow_html=True)
 
-            blocks = extract_code_blocks(fix_result)
-
-            st.markdown('<span class="badge badge-red">⚑ Bugs Found & Fixed</span>', unsafe_allow_html=True)
-
-            # Show full markdown response — fixed code blocks render automatically
-            st.markdown(fix_result)
+                # Show full markdown response — fixed code blocks render automatically
+                st.markdown(fix_result)
 
 
 # ── Footer ────────────────────────────────────────────────────────────────────
