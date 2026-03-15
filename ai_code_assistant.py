@@ -1,10 +1,8 @@
 import streamlit as st
-import anthropic
 from groq import Groq
 import re
 
 
-DEFAULT_MODEL = "claude-sonnet-4-20250514"
 DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
 
 # ── Page config ──────────────────────────────────────────────────────────────
@@ -233,57 +231,28 @@ hr { border-color: var(--border) !important; margin: 1.5rem 0 !important; }
 """, unsafe_allow_html=True)
 
 
-# ── Anthropic client ──────────────────────────────────────────────────────────
-@st.cache_resource
-def get_client(api_key: str):
-    return anthropic.Anthropic(api_key=api_key)
-
-
 @st.cache_resource
 def get_groq_client(api_key: str):
     return Groq(api_key=api_key)
 
 
-def call_with_fallback(
+def call_assistant(
     system: str,
     user: str,
-    anthropic_api_key: str,
-    anthropic_model: str,
     groq_api_key: str,
     groq_model: str,
-) -> tuple[str, str]:
-    client = get_client(anthropic_api_key)
-    try:
-        msg = client.messages.create(
-            model=anthropic_model,
-            max_tokens=4096,
-            system=system,
-            messages=[{"role": "user", "content": user}],
-        )
-        return msg.content[0].text, "anthropic"
-    except Exception as anthropic_exc:
-        if not groq_api_key:
-            raise anthropic_exc
-
-        groq_client = get_groq_client(groq_api_key)
-        groq_completion = groq_client.chat.completions.create(
-            model=groq_model,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            temperature=0.2,
-            max_tokens=4096,
-        )
-        return groq_completion.choices[0].message.content or "", "groq"
-
-
-def get_api_key() -> str:
-    return (
-        st.secrets.get("ANTHROPIC_API_KEY")
-        or st.session_state.get("anthropic_api_key", "")
-        or ""
+) -> str:
+    groq_client = get_groq_client(groq_api_key)
+    groq_completion = groq_client.chat.completions.create(
+        model=groq_model,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        temperature=0.2,
+        max_tokens=4096,
     )
+    return groq_completion.choices[0].message.content or ""
 
 
 def get_groq_api_key() -> str:
@@ -294,62 +263,36 @@ def get_groq_api_key() -> str:
     )
 
 
-def setup_controls() -> tuple[str, str, str, str]:
+def setup_controls() -> tuple[str, str]:
     with st.expander("⚙️ Assistant Settings", expanded=False):
-        api_key_default = st.session_state.get("anthropic_api_key", "")
-        anthropic_api_key = st.text_input(
-            "Anthropic API Key",
-            type="password",
-            value=api_key_default,
-            placeholder="sk-ant-...",
-            help="Stored only for this browser session. You can also set ANTHROPIC_API_KEY in Streamlit secrets.",
-        )
-        st.session_state["anthropic_api_key"] = anthropic_api_key
-
         groq_api_default = st.session_state.get("groq_api_key", "")
         groq_api_key = st.text_input(
-            "Groq API Key (fallback)",
+            "Groq API Key",
             type="password",
             value=groq_api_default,
             placeholder="gsk_...",
-            help="Used automatically only when Anthropic requests fail. You can also set GROQ_API_KEY in Streamlit secrets.",
+            help="Stored only for this browser session. You can also set GROQ_API_KEY in Streamlit secrets.",
         )
         st.session_state["groq_api_key"] = groq_api_key
 
-        anthropic_model = st.selectbox(
-            "Anthropic Model",
-            options=[
-                DEFAULT_MODEL,
-                "claude-3-7-sonnet-latest",
-                "claude-3-5-sonnet-latest",
-            ],
-            index=0,
-            help="Primary model used for all assistant tabs.",
-        )
-
         groq_model = st.selectbox(
-            "Groq Model (fallback)",
+            "Groq Model",
             options=[
                 DEFAULT_GROQ_MODEL,
                 "llama-3.1-8b-instant",
                 "mixtral-8x7b-32768",
             ],
             index=0,
-            help="Fallback model used if Anthropic API requests fail.",
+            help="Model used for all assistant tabs.",
         )
 
-    resolved_anthropic_api_key = get_api_key()
     resolved_groq_api_key = get_groq_api_key()
-    if resolved_anthropic_api_key and resolved_groq_api_key:
-        st.caption("✅ Anthropic + Groq API keys detected. Anthropic is primary; Groq is fallback.")
-    elif resolved_anthropic_api_key:
-        st.caption("✅ Anthropic API key detected. Ready to generate.")
-    elif resolved_groq_api_key:
-        st.caption("✅ Groq API key detected. Add Anthropic key to enable primary + fallback flow.")
+    if resolved_groq_api_key:
+        st.caption("✅ Groq API key detected. Ready to generate.")
     else:
-        st.warning("Add an Anthropic API key (and optionally a Groq API key fallback) in settings to use the assistant.")
+        st.warning("Add a Groq API key in settings to use the assistant.")
 
-    return resolved_anthropic_api_key, anthropic_model, resolved_groq_api_key, groq_model
+    return resolved_groq_api_key, groq_model
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -367,13 +310,13 @@ LANGUAGES = [
 # ── Header ────────────────────────────────────────────────────────────────────
 st.markdown("""
 <div class="hero">
-  <div class="hero-tag">⚡ Powered by Claude</div>
+  <div class="hero-tag">⚡ Python Masters Mode</div>
   <h1>AI Code Assistant</h1>
-  <p>// english → code · code review · bug fixing</p>
+  <p>// in-depth coding · expert review · precision bug fixing</p>
 </div>
 """, unsafe_allow_html=True)
 
-api_key, model_choice, groq_api_key, groq_model_choice = setup_controls()
+api_key, model_choice = setup_controls()
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
 tab1, tab2, tab3 = st.tabs(["✦ English → Code", "⊞ Code Review", "⚑ Bug Fixer"])
@@ -399,13 +342,14 @@ with tab1:
         lang_choice = st.selectbox("Language", LANGUAGES, key="lang_pick")
         add_comments = st.checkbox("Add comments", value=True)
         add_tests = st.checkbox("Add unit tests", value=False)
+        python_master_mode = st.checkbox("Python masters mode", value=(lang_choice == "Python"))
 
     gen_btn = st.button("⚡ Generate Code", key="gen_btn", use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
     if gen_btn:
         if not api_key:
-            st.error("Missing API key. Open Assistant Settings and add your Anthropic key.")
+            st.error("Missing API key. Open Assistant Settings and add your Groq key.")
         elif not english_input.strip():
             st.warning("Please describe what you want to build.")
         else:
@@ -416,21 +360,30 @@ with tab1:
                 extras.append("After the main code, include basic unit tests.")
             extra_str = " ".join(extras)
 
+            mastery_boost = ""
+            if python_master_mode and lang_choice == "Python":
+                mastery_boost = """
+Add production-grade Python craftsmanship:
+- Use clear type hints and strong naming.
+- Add docstrings for public functions/classes.
+- Highlight complexity (Big-O) where helpful.
+- Include edge-case handling and input validation when relevant.
+"""
+
             system_prompt = f"""You are an expert {lang_choice} developer.
 Convert the user's plain-English description into clean, idiomatic {lang_choice} code.
 {extra_str}
+{mastery_boost}
 Wrap the code in a fenced code block with the correct language tag.
 After the code block, add a short 'How it works' explanation in 3-5 bullet points."""
 
             try:
                 with st.spinner("Generating code…"):
-                    result, provider_used = call_with_fallback(
+                    result = call_assistant(
                         system_prompt,
                         english_input,
                         api_key,
                         model_choice,
-                        groq_api_key,
-                        groq_model_choice,
                     )
             except Exception as exc:
                 st.error(f"Generation failed: {exc}")
@@ -449,10 +402,6 @@ After the code block, add a short 'How it works' explanation in 3-5 bullet point
                 if explanation:
                     st.markdown("**How it works**")
                     st.markdown(explanation)
-
-                if provider_used == "groq":
-                    st.info("Anthropic request failed; response generated using Groq fallback.")
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TAB 2 — Code Review
@@ -477,13 +426,14 @@ with tab2:
         chk_perf = st.checkbox("Performance", value=True)
     with col_r3:
         chk_security = st.checkbox("Security", value=True)
+    python_deep_review = st.checkbox("Python deep review rubric", value=(review_lang == "Python"))
 
     review_btn = st.button("⊞ Review Code", key="rev_btn", use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
     if review_btn:
         if not api_key:
-            st.error("Missing API key. Open Assistant Settings and add your Anthropic key.")
+            st.error("Missing API key. Open Assistant Settings and add your Groq key.")
         elif not code_to_review.strip():
             st.warning("Please paste some code to review.")
         else:
@@ -492,8 +442,20 @@ with tab2:
                                        ("security vulnerabilities", chk_security)] if c]
             focus_str = ", ".join(focuses) if focuses else "general best practices"
 
+            depth_instruction = ""
+            if python_deep_review and review_lang == "Python":
+                depth_instruction = """
+Also apply an advanced Python review rubric:
+- Pythonic style (PEP 8/20), readability, and maintainability.
+- Type safety and API design.
+- Runtime and memory efficiency.
+- Testability and observability.
+- Security, data validation, and failure handling.
+"""
+
             system_prompt = f"""You are a senior {review_lang} engineer conducting a thorough code review.
 Analyze the code focusing on: {focus_str}.
+{depth_instruction}
 
 Structure your response as:
 ## Overall Score
@@ -513,21 +475,17 @@ One paragraph takeaway."""
 
             try:
                 with st.spinner("Reviewing code…"):
-                    review_result, provider_used = call_with_fallback(
+                    review_result = call_assistant(
                         system_prompt,
                         code_to_review,
                         api_key,
                         model_choice,
-                        groq_api_key,
-                        groq_model_choice,
                     )
             except Exception as exc:
                 st.error(f"Review failed: {exc}")
             else:
                 st.markdown('<span class="badge badge-blue">⊞ Review Complete</span>', unsafe_allow_html=True)
                 st.markdown(review_result)
-                if provider_used == "groq":
-                    st.info("Anthropic request failed; response generated using Groq fallback.")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -554,11 +512,12 @@ with tab3:
     )
 
     fix_btn = st.button("⚑ Find & Fix Bugs", key="fix_btn", use_container_width=True)
+    python_root_cause_mode = st.checkbox("Python root-cause mode", value=(fix_lang == "Python"))
     st.markdown('</div>', unsafe_allow_html=True)
 
     if fix_btn:
         if not api_key:
-            st.error("Missing API key. Open Assistant Settings and add your Anthropic key.")
+            st.error("Missing API key. Open Assistant Settings and add your Groq key.")
         elif not buggy_code.strip():
             st.warning("Please paste the buggy code.")
         else:
@@ -566,9 +525,20 @@ with tab3:
             if error_msg.strip():
                 context += f"\n\nError/Traceback:\n{error_msg}"
 
+            fix_depth = ""
+            if python_root_cause_mode and fix_lang == "Python":
+                fix_depth = """
+For Python specifically:
+- Identify anti-patterns that caused the bug.
+- Preserve readability and idiomatic design.
+- Add defensive checks for edge cases.
+- Mention how to prevent regressions with a focused test plan.
+"""
+
             system_prompt = f"""You are an expert {fix_lang} debugger.
 
 Analyze the provided code (and error message if given).
+{fix_depth}
 
 Respond in this exact structure:
 
@@ -587,13 +557,11 @@ Bullet-point summary of every change made and why."""
 
             try:
                 with st.spinner("Hunting bugs…"):
-                    fix_result, provider_used = call_with_fallback(
+                    fix_result = call_assistant(
                         system_prompt,
                         context,
                         api_key,
                         model_choice,
-                        groq_api_key,
-                        groq_model_choice,
                     )
             except Exception as exc:
                 st.error(f"Bug fixing failed: {exc}")
@@ -602,14 +570,12 @@ Bullet-point summary of every change made and why."""
 
                 # Show full markdown response — fixed code blocks render automatically
                 st.markdown(fix_result)
-                if provider_used == "groq":
-                    st.info("Anthropic request failed; response generated using Groq fallback.")
 
 
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.markdown("<br>", unsafe_allow_html=True)
 st.markdown("""
 <div style="text-align:center; color: #3a3a5c; font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; padding: 2rem 0 1rem; border-top: 1px solid #1e1e2e;">
-  AI Code Assistant · Built with Streamlit + Claude (Anthropic) + Groq fallback
+  AI Code Assistant · Built with Streamlit + Groq · Tuned for in-depth Python workflows
 </div>
 """, unsafe_allow_html=True)
